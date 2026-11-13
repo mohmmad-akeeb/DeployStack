@@ -441,7 +441,7 @@ Contributions, issues, and feature suggestions are welcome!
 
 ## License
 
-No license has been assigned to this repository yet. The licensing decision is currently unresolved pending project maintainer approval.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
