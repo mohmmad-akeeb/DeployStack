@@ -39,6 +39,8 @@ class StorageClient:
                     logger.warning("Could not auto-create S3 bucket: %s", create_exc)
             else:
                 logger.debug("S3 bucket check failed: %s", exc)
+        except Exception as exc:
+            logger.warning("S3 endpoint connection check failed: %s", exc)
 
     def put_object(self, key: str, data: bytes | BinaryIO, content_type: str) -> None:
         """Upload binary object bytes or stream to S3 / MinIO."""

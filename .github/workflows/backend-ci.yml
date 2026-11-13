@@ -20,6 +20,31 @@ jobs:
       run:
         working-directory: application/backend
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: deploystack
+          POSTGRES_PASSWORD: deploystack_password
+          POSTGRES_DB: deploystack_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          server /data
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -42,4 +67,16 @@ jobs:
         run: mypy app/
 
       - name: Run Pytest test suite
+        env:
+          POSTGRES_SERVER: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: deploystack
+          POSTGRES_PASSWORD: deploystack_password
+          POSTGRES_DB: deploystack_db
+          DATABASE_URL: postgresql://deploystack:deploystack_password@localhost:5432/deploystack_db
+          S3_ENDPOINT_URL: http://localhost:9000
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+          S3_BUCKET_NAME: deploystack-attachments
         run: pytest -v

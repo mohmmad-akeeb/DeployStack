@@ -42,4 +42,5 @@ jobs:
 
       - name: Run Terraform Mock Unit Tests
         run: |
+          terraform -chdir=tests init -backend=false
           terraform -chdir=tests test -verbose
