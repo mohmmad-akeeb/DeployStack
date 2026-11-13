@@ -1,19 +1,18 @@
 # DeployStack — Project Status & Milestone Tracker
 
-**Current Phase:** Phase 4 (Backend Refinement & Testing) & Phase 5 (Frontend Tooling & Integration)  
-**Overall Progress:** ~65% Complete  
+**Current Phase:** Phase 5 (Frontend Tooling & Component Testing) & Phase 6 (Terraform IaC Mock Tests)  
+**Overall Progress:** ~75% Complete  
 **Last Updated:** 2026-11-13  
-**Last Completed Git Commit:** `03cb4d5` (*feat: implement DeployStack frontend architecture, pages, and API integrations*)  
+**Last Completed Git Commit:** `2cb431a` (*ci: run alembic migrations prior to pytest in backend CI*)  
 
 ---
 
 ## 1. Active Phase Overview
 - **Phase Objectives:**
-  - Polish Phase 4 Backend: Fix root-directory execution for `test_migrations.py`, resolve 19 Ruff lint errors, and verify 100% test pass rate.
-  - Polish Phase 5 Frontend: Add ESLint configuration (`.eslintrc.cjs`), fix lint script, and verify Vitest harness.
-  - Stage and commit untracked components (backend, infrastructure, docs, docker-compose).
-- **Current Concrete Task:** Resolve `test_migrations.py` relative configuration path and clean up test file lint warnings.
-- **Active Skills Required:** `fastapi-pro`, `python-testing-patterns`, `debugger`.
+  - Polish Phase 5 Frontend: Add ESLint configuration (`.eslintrc.cjs`), fix lint script, and set up Vitest unit tests for critical components.
+  - Execute Phase 6 Infrastructure: Implement Terraform 1.7+ mock provider unit tests for remaining 5 modules (`security`, `load-balancer`, `compute`, `database`, `storage`).
+- **Current Concrete Task:** Configure ESLint and verify `npm run lint` in `application/frontend`.
+- **Active Skills Required:** `frontend-developer`, `fastapi-pro`, `python-testing-patterns`, `use-graphify`.
 
 ---
 
@@ -28,11 +27,12 @@
 - [x] **Phase 3: Relational Database Modeling & OpenAPI 3.1 Contracts**
   - PostgreSQL 16 schema specification in `docs/database/schema.md` and executable DDL in `docs/database/schema.sql`.
   - Comprehensive API contracts in `docs/api/api-contracts.md`, `openapi.yaml`, and `openapi.json`.
-- [ ] **Phase 4: Backend Implementation & Test Suite (90% Complete)**
+- [x] **Phase 4: Backend Implementation & Test Suite (100% Complete)**
   - FastAPI modular monolith implemented (routers, services, repositories, models, schemas).
-  - Alembic baseline migration `d321b9b313de_initial_schema.py` generated.
-  - 39 Pytest tests implemented; 39/39 passing from `application/backend`.
-  - *Pending:* Fix root-directory invocation for `test_migrations.py`, fix 19 Ruff lint errors, and stage in Git.
+  - Alembic baseline migration `d321b9b313de_initial_schema.py` verified.
+  - 39 Pytest tests implemented; 39/39 passing from both repository root and `application/backend`.
+  - Dynamic `alembic.ini` configuration path resolution implemented in `tests/test_migrations.py`.
+  - Zero Ruff lint errors and zero Mypy type-check errors in 47 source files.
 - [ ] **Phase 5: Frontend Architecture & Integration (85% Complete)**
   - Complete React 18 + TypeScript + Vite + Tailwind CSS SPA implemented.
   - Pages: Login, Register, Dashboard, Projects, Kanban, Project Details, Profile.
@@ -47,9 +47,10 @@
   - `docker-compose.yml` configured for `backend`, `frontend`, `postgres`, `minio`, `minio-init`.
   - Dockerfiles for backend and frontend verified.
   - *Pending:* Live multi-container boot test and health check validation.
-- [ ] **Phase 8: GitHub Actions CI/CD Automation (70% Complete)**
+- [ ] **Phase 8: GitHub Actions CI/CD Automation (80% Complete)**
   - Workflows created in `.github/workflows/` (`backend-ci.yml`, `frontend-ci.yml`, `terraform-ci.yml`).
-  - *Pending:* Track in Git, add frontend linting/testing steps.
+  - MinIO service container step and Alembic migration step added to backend CI.
+  - *Pending:* Add frontend linting/testing steps.
 - [ ] **Phase 9: Performance Benchmarking & Locust Load Testing (0% Complete)**
   - *Pending:* Implement `tests/load/locustfile.py` and benchmark P95 latencies.
 - [ ] **Phase 10: Final Security Audit & Production Release (0% Complete)**
@@ -59,33 +60,32 @@
 
 ## 3. Test & Quality Metrics
 
-*   **Backend Pytest Suite:** 39 passed / 0 failed (when executed inside `application/backend`). 38 passed / 1 failed (when executed from repo root).
+*   **Backend Pytest Suite:** 39 passed / 0 failed (100% pass rate from repo root and `application/backend`).
 *   **Backend Type Checking:** `mypy app/` passes with 0 issues in 47 source files.
-*   **Backend Linter:** `ruff check .` reports 19 fixable warnings (unused imports/variables in test files and alembic script).
+*   **Backend Linter:** `ruff check .` passes with 0 warnings.
 *   **Frontend Vite Build:** `tsc -b && vite build` passed (bundled in 3.58s).
-*   **Frontend Linter:** `npm run lint` fails (ESLint config file not found).
+*   **Frontend Linter:** `npm run lint` pending ESLint config.
 *   **Docker Compose Configuration:** `docker compose config` is syntactically valid.
-*   **Terraform Mock Tests:** `networking.tftest.hcl` implemented (relies on GitHub Actions runner).
+*   **Terraform Mock Tests:** `networking.tftest.hcl` implemented.
+*   **Graphify Knowledge Graph:** Synced; Obsidian vault active with 987 notes in `graphify-out/obsidian/`.
 
 ---
 
 ## 4. Blockers & Known Technical Debt
 
 ### Blockers
-*   *None.* Development can proceed locally without external dependencies.
+*   *None.*
 
 ### Technical Debt & Discrepancies
-1.  **Git Staging Debt:** 80% of repository code (backend, infra, docs, github actions) is currently untracked in Git.
-2.  **Missing Graphify Obsidian Vault:** `graphify-out/obsidian` was never generated, causing agent navigation checks to fail and trigger broad repository scans.
-3.  **Root-Directory Test Path Dependency:** `application/backend/tests/test_migrations.py` expects `alembic.ini` in the current working directory instead of resolving relative to the file location.
-4.  **Local Terraform CLI Missing:** `terraform` binary is not present on the host OS; IaC validation currently depends on CI.
-5.  **Nested Redundant Skill Directories:** External tools installed orphaned `.agent/` and `.agents/` folders inside `application/frontend/`.
+1.  **Frontend Linter & Testing:** Missing ESLint configuration and automated component tests.
+2.  **Local Terraform CLI Missing:** `terraform` binary is not present on the host OS; IaC validation currently depends on CI.
+3.  **Module Test Coverage:** Mock provider tests need to be added for `security`, `load-balancer`, `compute`, `database`, and `storage`.
 
 ---
 
 ## 5. Immediate Next Concrete Tasks
 
-1.  **Task 1 (Backend Polish):** Update `application/backend/tests/test_migrations.py` to resolve `alembic.ini` dynamically and run `ruff check --fix` on backend tests.
-2.  **Task 2 (Frontend Polish):** Add `.eslintrc.cjs` to `application/frontend` and verify `npm run lint` passes.
-3.  **Task 3 (Graphify Sync):** Run `graphify update .` and `graphify export obsidian --dir graphify-out/obsidian` to restore deterministic AST navigation.
+1.  **Task 1 (Frontend Polish):** Create `.eslintrc.cjs` in `application/frontend` and verify `npm run lint` passes.
+2.  **Task 2 (Frontend Unit Testing):** Set up Vitest test harness and add tests for `AuthContext` and core UI components.
+3.  **Task 3 (Terraform Mock Tests):** Author `.tftest.hcl` mock test suites for remaining 5 modules.
 4.  **Task 4 (Git Milestone Commit):** Stage and commit untracked backend, docs, docker, and infra components under conventional commit standards.

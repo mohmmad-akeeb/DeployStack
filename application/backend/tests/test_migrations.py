@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlalchemy import inspect
 
 from alembic.command import upgrade
@@ -7,7 +9,13 @@ from app.core.database import engine
 
 def test_alembic_upgrade_and_downgrade() -> None:
     """Verify that Alembic migrations run cleanly up and down."""
-    alembic_cfg = Config("alembic.ini")
+    backend_dir = Path(__file__).resolve().parent.parent
+    ini_path = backend_dir / "alembic.ini"
+    alembic_cfg = Config(str(ini_path))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+    alembic_cfg.set_main_option(
+        "version_locations", str(backend_dir / "alembic" / "versions")
+    )
 
     # Run upgrade head
     upgrade(alembic_cfg, "head")
