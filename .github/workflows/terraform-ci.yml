@@ -1,0 +1,45 @@
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/**"
+      - ".github/workflows/terraform-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infrastructure/**"
+      - ".github/workflows/terraform-ci.yml"
+
+jobs:
+  validate:
+    name: Terraform Format, Validate & Mock Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init (No Backend)
+        run: |
+          for env in environments/dev environments/production; do
+            echo "Initializing $env..."
+            terraform -chdir=$env init -backend=false
+            terraform -chdir=$env validate
+          done
+
+      - name: Run Terraform Mock Unit Tests
+        run: |
+          terraform -chdir=tests test -verbose

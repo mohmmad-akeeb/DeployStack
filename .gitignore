@@ -54,6 +54,8 @@ dist/
 dist-ssr/
 *.local
 .vite/
+application/frontend/vite.config.js
+application/frontend/vite.config.d.ts
 
 # Terraform
 .terraform/
@@ -83,3 +85,9 @@ Thumbs.db
 *.swp
 *.swo
 *.tsbuildinfo
+
+# AI & Agent local tooling / caches
+.agent/
+.agents/
+skills-lock.json
+graphify-out/

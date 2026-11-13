@@ -1,0 +1,2639 @@
+openapi: 3.1.0
+info:
+  title: DeployStack API
+  description: |
+    Production-grade RESTful API contract for DeployStack — Three-Tier Team Task and Issue Management Web Application.
+    Designed for FastAPI backend implementation with PostgreSQL 16 persistence, MinIO / AWS S3 object storage, and stateless JWT Bearer authentication.
+  version: 0.1.0
+  contact:
+    name: DeployStack Engineering Team
+    email: engineering@deploystack.local
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local Docker Compose & Development Server
+  - url: http://backend:8000
+    description: Docker Bridge Internal Service URL
+  - url: https://api.deploystack.local
+    description: Target AWS Production Application Load Balancer
+
+tags:
+  - name: Health
+    description: System observability, readiness, and liveness health checks
+  - name: Authentication
+    description: User registration, JWT login, and credential verification
+  - name: User Profile
+    description: Current user profile management and credential updates
+  - name: Projects
+    description: Workspace lifecycle management (CRUD, status, listing)
+  - name: Project Membership
+    description: Workspace collaboration, member invitations, and role assignments
+  - name: Tasks
+    description: Kanban work items, task creation, details, and modifications
+  - name: Task Status
+    description: Kanban board status column movements and position reordering
+  - name: Task Assignments
+    description: Work item delegation to project members (M:N decoupled assignments)
+  - name: Attachments
+    description: Binary file uploads (max 10MB) and streamed download proxies
+  - name: Activity Logs
+    description: Chronological audit feeds of workspace and issue state changes
+  - name: Dashboard Statistics
+    description: Aggregated metrics for individual users and project workspaces
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Root health check probe
+      description: Returns service readiness, database connectivity, and environment metadata for load balancers and container orchestrators.
+      operationId: check_health_root
+      responses:
+        "200":
+          description: Service is healthy and database is connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Database connectivity failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: API v1 health check probe
+      description: Returns service status, environment, version, and database connectivity.
+      operationId: check_health_v1
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service degraded or database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user account
+      description: Creates a new user profile with bcrypt-hashed credentials. Email must be unique.
+      operationId: register_user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserRegisterRequest"
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: Validation error or weak password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email address already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unprocessable entity / schema validation failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user credentials and issue JWT
+      description: Exchanges valid email and password for a signed stateless JWT access token (valid 60 minutes).
+      operationId: login_user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserLoginRequest"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/OAuth2PasswordRequest"
+      responses:
+        "200":
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: Invalid email or password, or account inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unprocessable entity / validation failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/auth/me:
+    get:
+      tags: [User Profile]
+      summary: Get current authenticated user profile
+      description: Retrieves identity, full name, avatar, and system flags of the caller extracted from JWT claims.
+      operationId: get_current_user_profile
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Missing, invalid, or expired JWT token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/profile:
+    put:
+      tags: [User Profile]
+      summary: Update current user profile
+      description: Modifies editable profile attributes (full name, avatar URL).
+      operationId: update_user_profile
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserProfileUpdateRequest"
+      responses:
+        "200":
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: Invalid profile data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/auth/change-password:
+    post:
+      tags: [User Profile]
+      summary: Change user password
+      description: Verifies current password before generating a new bcrypt hash for the user.
+      operationId: change_password
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChangeRequest"
+      responses:
+        "200":
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Current password incorrect or new password does not meet complexity standards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: List user projects
+      description: Returns a paginated list of workspaces where the authenticated user is either the Owner or an active Member.
+      operationId: list_projects
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by project status
+          schema:
+            type: string
+            enum: [active, archived, completed]
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based)
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          required: false
+          description: Number of items per page
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: search
+          in: query
+          required: false
+          description: Filter projects by name substring match
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated projects retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      tags: [Projects]
+      summary: Create a new project
+      description: Creates a new workspace project. The calling user is automatically registered as Project Owner in both `projects` and `project_members`.
+      operationId: create_project
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project details
+      description: Retrieves complete project metadata, owner details, counts, and caller's specific role in the project.
+      operationId: get_project_by_id
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Project details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: User is not a member of this project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags: [Projects]
+      summary: Update project details
+      description: Modifies project name, description, or status. Restricted to Project Owner or Project Admin.
+      operationId: update_project
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateRequest"
+      responses:
+        "200":
+          description: Project updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          description: Invalid project update data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks Owner or Admin role in this project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      description: Permanently purges a project, cascading to tasks, members, attachments, and activity logs. Restricted strictly to Project Owner.
+      operationId: delete_project
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Project deleted successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; only the Project Owner can delete this project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/members:
+    get:
+      tags: [Project Membership]
+      summary: List members of a project
+      description: Returns all team members enrolled in the project along with their assigned roles.
+      operationId: list_project_members
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Member list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMemberListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller must belong to the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      tags: [Project Membership]
+      summary: Add a member to the project
+      description: Adds a registered user to the project workspace by email with a designated role (admin, member, viewer). Restricted to Project Owner or Admin.
+      operationId: add_project_member
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddProjectMemberRequest"
+      responses:
+        "201":
+          description: Member added successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMemberResponse"
+        "400":
+          description: Invalid role specified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks Owner or Admin permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User with the specified email does not exist, or project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: User is already an active member of this project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/projects/{id}/members/{user_id}/role:
+    put:
+      tags: [Project Membership]
+      summary: Update a member's role
+      description: Updates the workspace role of an existing project member (admin, member, viewer). Restricted to Project Owner.
+      operationId: update_project_member_role
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: path
+          required: true
+          description: Unique UUID of the user member
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMemberRoleRequest"
+      responses:
+        "200":
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMemberResponse"
+        "400":
+          description: Cannot modify the Owner's role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; only Project Owner can update member roles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Member not found in project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/projects/{id}/members/{user_id}:
+    delete:
+      tags: [Project Membership]
+      summary: Remove a member from the project
+      description: Removes a user from the workspace. Automatically unassigns that user from any tasks in the project. Restricted to Project Owner or Admin (or self-removal).
+      operationId: remove_project_member
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: path
+          required: true
+          description: Unique UUID of the member to remove
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Member removed successfully
+        "400":
+          description: Project Owner cannot leave the project without transferring ownership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks permission to remove this member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Member not found in project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks within a project
+      description: Retrieves tasks filtered by project, status column, priority, or assignee. Optimized for Kanban board columns and table views.
+      operationId: list_tasks
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          description: Filter tasks by project UUID
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: Filter by Kanban status
+          schema:
+            type: string
+            enum: [todo, in_progress, completed]
+        - name: priority
+          in: query
+          required: false
+          description: Filter by priority
+          schema:
+            type: string
+            enum: [low, medium, high, urgent]
+        - name: assignee_id
+          in: query
+          required: false
+          description: Filter by assigned user UUID
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          required: false
+          description: Filter by keyword in title or description
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Tasks retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the requested project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      tags: [Tasks]
+      summary: Create a new task
+      description: Creates a task item inside a project. Assignees must be verified active members of that project. Restricted to Project Owner, Admin, or Member.
+      operationId: create_task
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreateRequest"
+      responses:
+        "201":
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailResponse"
+        "400":
+          description: Assignee is not a member of the project, or invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks task creation privileges
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: Get task details
+      description: Retrieves complete details for a single task including assignees, attachments, and metadata.
+      operationId: get_task_by_id
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Task details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the task's project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags: [Tasks]
+      summary: Update task details
+      description: Updates task title, description, priority, or due date. Restricted to Project Owner, Admin, task author, or an assigned member.
+      operationId: update_task
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUpdateRequest"
+      responses:
+        "200":
+          description: Task updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailResponse"
+        "400":
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks update permissions for this task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      description: Permanently deletes a task and its associated attachments. Restricted to Project Owner, Admin, or the task creator.
+      operationId: delete_task
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Task deleted successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks task deletion permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/tasks/{id}/status:
+    patch:
+      tags: [Task Status]
+      summary: Update task Kanban status and position
+      description: |
+        Transitions a task card between status columns (`todo`, `in_progress`, `completed`) and updates its vertical position index.
+        Dispatches an activity log event for Kanban audit tracking.
+      operationId: update_task_status
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskStatusUpdateRequest"
+      responses:
+        "200":
+          description: Task status and position updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetailResponse"
+        "400":
+          description: Invalid status value or negative position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not an active collaborator in this project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/tasks/{id}/assignments:
+    get:
+      tags: [Task Assignments]
+      summary: List assigned members for a task
+      description: Returns all users assigned to the specified task card with assignment metadata.
+      operationId: list_task_assignments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of task assignees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskAssigneeResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      tags: [Task Assignments]
+      summary: Assign users to a task
+      description: Assigns one or more team members to the task. Users must belong to the parent project.
+      operationId: assign_users_to_task
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskAssignRequest"
+      responses:
+        "200":
+          description: Users assigned successfully; returns updated assignee list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskAssigneeResponse"
+        "400":
+          description: One or more target users are not active project members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks assignment permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+
+  /api/v1/tasks/{id}/assignments/{user_id}:
+    delete:
+      tags: [Task Assignments]
+      summary: Remove a user assignment from a task
+      description: Unassigns a specific member from the task card.
+      operationId: unassign_user_from_task
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: path
+          required: true
+          description: Unique UUID of the assigned user
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Assignment removed successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks permission to modify assignments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task or assignment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/tasks/{id}/attachments:
+    get:
+      tags: [Attachments]
+      summary: List attachments for a task
+      description: Returns file metadata for all attachments associated with the task card.
+      operationId: list_task_attachments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Attachments listed successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AttachmentResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      tags: [Attachments]
+      summary: Upload a file attachment to a task
+      description: |
+        Streams multipart file data directly into MinIO / S3 object storage and records metadata in PostgreSQL.
+        Enforces a 10MB maximum file size limit and MIME-type validation.
+      operationId: upload_task_attachment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Binary file payload (max 10MB)
+      responses:
+        "201":
+          description: Attachment uploaded and recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentResponse"
+        "400":
+          description: Missing file or empty binary stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Payload Too Large; file exceeds 10MB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Unsupported Media Type; rejected file format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/attachments/{id}/download:
+    get:
+      tags: [Attachments]
+      summary: Download an attachment file
+      description: |
+        Streams binary file content from MinIO / S3 storage via FastAPI streaming proxy.
+        Validates JWT authentication and project membership, ensuring S3 credentials remain strictly private.
+      operationId: download_attachment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the attachment record
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Binary file stream with Content-Disposition attachment header
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: attachment; filename="architecture-diagram.png"
+            Content-Type:
+              schema:
+                type: string
+                example: image/png
+            Content-Length:
+              schema:
+                type: integer
+                example: 1048576
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks project access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attachment record or storage object not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/attachments/{id}:
+    delete:
+      tags: [Attachments]
+      summary: Delete an attachment
+      description: Purges attachment metadata from PostgreSQL and permanently deletes the corresponding binary object from S3 / MinIO. Restricted to Project Owner, Admin, or the original uploader.
+      operationId: delete_attachment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the attachment
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Attachment deleted successfully
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller lacks permission to delete this attachment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/activities:
+    get:
+      tags: [Activity Logs]
+      summary: Get project activity feed
+      description: Returns a chronologically descending audit stream of state changes, transitions, and user actions within the workspace.
+      operationId: get_project_activities
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+        - name: action
+          in: query
+          required: false
+          description: Filter by specific action enum
+          schema:
+            type: string
+        - name: entity_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [project, task, member, assignment, attachment]
+        - name: user_id
+          in: query
+          required: false
+          description: Filter by actor UUID
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Activity records retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityLogListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/tasks/{id}/activities:
+    get:
+      tags: [Activity Logs]
+      summary: Get task activity feed
+      description: Returns chronological audit logs specifically associated with a single task card.
+      operationId: get_task_activities
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the task
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Task activity records retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityLogListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/dashboard/stats:
+    get:
+      tags: [Dashboard Statistics]
+      summary: Get current user dashboard metrics
+      description: Returns high-level metrics across all workspaces the authenticated user participates in (assigned tasks count, upcoming deadlines, status distribution).
+      operationId: get_user_dashboard_stats
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Dashboard metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDashboardStatsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/stats:
+    get:
+      tags: [Dashboard Statistics]
+      summary: Get project dashboard metrics
+      description: "Aggregates project-level execution metrics: status breakdown, priority distribution, overdue items, completion ratio, and member workload."
+      operationId: get_project_stats
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the project
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Project statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDashboardStatsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden; caller is not a member of the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Provide standard RFC 7519 signed JWT access token in the Authorization header. Format: `Bearer <token>`"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - environment
+        - database_connected
+        - version
+      properties:
+        status:
+          type: string
+          example: healthy
+        environment:
+          type: string
+          example: development
+        database_connected:
+          type: boolean
+          example: true
+        version:
+          type: string
+          example: 0.1.0
+
+    MessageResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: Password changed successfully
+        detail:
+          type: string
+          nullable: true
+          example: null
+
+    ErrorResponse:
+      type: object
+      required:
+        - status_code
+        - error
+        - message
+        - timestamp
+        - path
+      properties:
+        status_code:
+          type: integer
+          example: 404
+        error:
+          type: string
+          example: Not Found
+        message:
+          type: string
+          example: Project with specified ID was not found
+        detail:
+          type: array
+          items:
+            type: object
+          example: []
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:45:00Z"
+        path:
+          type: string
+          example: /api/v1/projects/3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+    HTTPValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationErrorDetail"
+
+    ValidationErrorDetail:
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      properties:
+        loc:
+          type: array
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          example: ["body", "email"]
+        msg:
+          type: string
+          example: value is not a valid email address
+        type:
+          type: string
+          example: value_error
+
+    UserRegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - full_name
+      properties:
+        email:
+          type: string
+          format: email
+          example: alex@deploystack.local
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+          description: Password with min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special character
+          example: "SecureP@ssw0rd!"
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Alex Developer
+
+    UserLoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: alex@deploystack.local
+        password:
+          type: string
+          format: password
+          example: "SecureP@ssw0rd!"
+
+    OAuth2PasswordRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          format: email
+          description: User email address
+          example: alex@deploystack.local
+        password:
+          type: string
+          format: password
+          example: "SecureP@ssw0rd!"
+
+    TokenResponse:
+      type: object
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - user
+      properties:
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          description: Token lifetime in seconds (3600 = 60 minutes)
+          example: 3600
+        user:
+          $ref: "#/components/schemas/UserResponse"
+
+    UserResponse:
+      type: object
+      required:
+        - id
+        - email
+        - full_name
+        - is_active
+        - is_superuser
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        email:
+          type: string
+          format: email
+          example: alex@deploystack.local
+        full_name:
+          type: string
+          example: Alex Developer
+        avatar_url:
+          type: string
+          nullable: true
+          example: "https://avatar.deploystack.local/u/alex.png"
+        is_active:
+          type: boolean
+          example: true
+        is_superuser:
+          type: boolean
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:00:00Z"
+
+    UserSummaryResponse:
+      type: object
+      required:
+        - id
+        - email
+        - full_name
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        email:
+          type: string
+          format: email
+          example: alex@deploystack.local
+        full_name:
+          type: string
+          example: Alex Developer
+        avatar_url:
+          type: string
+          nullable: true
+          example: null
+
+    UserProfileUpdateRequest:
+      type: object
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Alexander Developer
+        avatar_url:
+          type: string
+          nullable: true
+          example: "https://avatar.deploystack.local/u/alex_new.png"
+
+    PasswordChangeRequest:
+      type: object
+      required:
+        - current_password
+        - new_password
+      properties:
+        current_password:
+          type: string
+          format: password
+          example: "OldSecureP@ssw0rd!"
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+          example: "NewSecureP@ssw0rd2026!"
+
+    ProjectCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Infrastructure Automation
+        description:
+          type: string
+          nullable: true
+          example: Terraform modules and three-tier cloud deployment
+        status:
+          type: string
+          enum: [active, archived, completed]
+          default: active
+          example: active
+
+    ProjectUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Infrastructure Automation Modernization
+        description:
+          type: string
+          nullable: true
+          example: Updated workspace description
+        status:
+          type: string
+          enum: [active, archived, completed]
+          example: active
+
+    ProjectSummaryResponse:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - owner
+        - member_count
+        - task_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        name:
+          type: string
+          example: Infrastructure Automation
+        description:
+          type: string
+          nullable: true
+          example: Terraform modules and three-tier cloud deployment
+        status:
+          type: string
+          example: active
+        owner:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        member_count:
+          type: integer
+          example: 4
+        task_count:
+          type: integer
+          example: 18
+        current_user_role:
+          type: string
+          example: owner
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:00:00Z"
+
+    ProjectDetailResponse:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - owner
+        - member_count
+        - task_count
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        name:
+          type: string
+          example: Infrastructure Automation
+        description:
+          type: string
+          nullable: true
+          example: Terraform modules and three-tier cloud deployment
+        status:
+          type: string
+          example: active
+        owner:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        member_count:
+          type: integer
+          example: 4
+        task_count:
+          type: integer
+          example: 18
+        current_user_role:
+          type: string
+          example: owner
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:00:00Z"
+
+    ProjectListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+        - total_pages
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectSummaryResponse"
+        total:
+          type: integer
+          example: 1
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          example: 1
+
+    AddProjectMemberRequest:
+      type: object
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          example: devops@deploystack.local
+        role:
+          type: string
+          enum: [admin, member, viewer]
+          default: member
+          example: member
+
+    UpdateMemberRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [admin, member, viewer]
+          example: admin
+
+    ProjectMemberResponse:
+      type: object
+      required:
+        - project_id
+        - user
+        - role
+        - joined_at
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        user:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        role:
+          type: string
+          example: member
+        joined_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:15:00Z"
+
+    ProjectMemberListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectMemberResponse"
+        total:
+          type: integer
+          example: 3
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 50
+
+    TaskCreateRequest:
+      type: object
+      required:
+        - project_id
+        - title
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Configure Terraform VPC Module
+        description:
+          type: string
+          nullable: true
+          example: Declare public and private subnets across 2 AZs with route tables
+        status:
+          type: string
+          enum: [todo, in_progress, completed]
+          default: todo
+          example: todo
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+          default: medium
+          example: high
+        position:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 0
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-11-20T18:00:00Z"
+        assigned_user_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          example: ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]
+
+    TaskUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Refactor Terraform VPC Subnet CIDRs
+        description:
+          type: string
+          nullable: true
+          example: Update subnet CIDR blocks to accommodate future private endpoints
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+          example: urgent
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-11-22T18:00:00Z"
+
+    TaskStatusUpdateRequest:
+      type: object
+      required:
+        - status
+        - position
+      properties:
+        status:
+          type: string
+          enum: [todo, in_progress, completed]
+          example: in_progress
+        position:
+          type: integer
+          minimum: 0
+          example: 1
+
+    TaskAssignRequest:
+      type: object
+      required:
+        - user_ids
+      properties:
+        user_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          example: ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]
+        role:
+          type: string
+          enum: [assignee, reviewer, watcher]
+          default: assignee
+          example: assignee
+
+    TaskAssigneeResponse:
+      type: object
+      required:
+        - task_id
+        - user
+        - role
+        - assigned_at
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          example: "8cf1cf14-1180-4965-b77c-a49cf97c0338"
+        user:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        role:
+          type: string
+          example: assignee
+        assigned_by:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        assigned_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:30:00Z"
+
+    TaskSummaryResponse:
+      type: object
+      required:
+        - id
+        - project_id
+        - title
+        - status
+        - priority
+        - position
+        - created_by
+        - assignees
+        - attachment_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "8cf1cf14-1180-4965-b77c-a49cf97c0338"
+        project_id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        title:
+          type: string
+          example: Configure Terraform VPC Module
+        status:
+          type: string
+          example: in_progress
+        priority:
+          type: string
+          example: high
+        position:
+          type: integer
+          example: 0
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-11-20T18:00:00Z"
+        created_by:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        assignees:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSummaryResponse"
+        attachment_count:
+          type: integer
+          example: 2
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:20:00Z"
+
+    TaskDetailResponse:
+      type: object
+      required:
+        - id
+        - project_id
+        - title
+        - status
+        - priority
+        - position
+        - created_by
+        - assignees
+        - attachments
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "8cf1cf14-1180-4965-b77c-a49cf97c0338"
+        project_id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        title:
+          type: string
+          example: Configure Terraform VPC Module
+        description:
+          type: string
+          nullable: true
+          example: Declare public and private subnets across 2 AZs with route tables
+        status:
+          type: string
+          example: in_progress
+        priority:
+          type: string
+          example: high
+        position:
+          type: integer
+          example: 0
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-11-20T18:00:00Z"
+        created_by:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        assignees:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskAssigneeResponse"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentSummaryResponse"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:20:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:35:00Z"
+
+    TaskListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+        - total_pages
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskSummaryResponse"
+        total:
+          type: integer
+          example: 5
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 50
+        total_pages:
+          type: integer
+          example: 1
+
+    AttachmentResponse:
+      type: object
+      required:
+        - id
+        - task_id
+        - file_name
+        - file_size
+        - content_type
+        - uploader
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "d6f78f8c-4c4c-4731-893d-d6a0f76901f1"
+        task_id:
+          type: string
+          format: uuid
+          example: "8cf1cf14-1180-4965-b77c-a49cf97c0338"
+        file_name:
+          type: string
+          example: vpc-topology-diagram.png
+        file_size:
+          type: integer
+          description: File size in bytes
+          example: 204800
+        content_type:
+          type: string
+          example: image/png
+        uploader:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:40:00Z"
+
+    AttachmentSummaryResponse:
+      type: object
+      required:
+        - id
+        - file_name
+        - file_size
+        - content_type
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "d6f78f8c-4c4c-4731-893d-d6a0f76901f1"
+        file_name:
+          type: string
+          example: vpc-topology-diagram.png
+        file_size:
+          type: integer
+          example: 204800
+        content_type:
+          type: string
+          example: image/png
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:40:00Z"
+
+    ActivityLogResponse:
+      type: object
+      required:
+        - id
+        - project_id
+        - action
+        - entity_type
+        - metadata
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "9e1c4b22-8611-4796-9f87-54b6c3e98123"
+        project_id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+          example: "8cf1cf14-1180-4965-b77c-a49cf97c0338"
+        user:
+          $ref: "#/components/schemas/UserSummaryResponse"
+        action:
+          type: string
+          example: TASK_STATUS_CHANGED
+        entity_type:
+          type: string
+          example: task
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+          example: "8cf1cf14-1180-4965-b77c-a49cf97c0338"
+        metadata:
+          type: object
+          example:
+            old_status: todo
+            new_status: in_progress
+            task_title: Configure Terraform VPC Module
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-13T10:35:00Z"
+
+    ActivityLogListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - page
+        - page_size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityLogResponse"
+        total:
+          type: integer
+          example: 24
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+
+    UserDashboardStatsResponse:
+      type: object
+      required:
+        - total_assigned_tasks
+        - tasks_by_status
+        - tasks_by_priority
+        - tasks_due_within_7_days
+        - overdue_tasks_count
+        - active_projects_count
+        - recent_activities
+      properties:
+        total_assigned_tasks:
+          type: integer
+          example: 7
+        tasks_by_status:
+          type: object
+          properties:
+            todo:
+              type: integer
+              example: 3
+            in_progress:
+              type: integer
+              example: 3
+            completed:
+              type: integer
+              example: 1
+        tasks_by_priority:
+          type: object
+          properties:
+            low:
+              type: integer
+              example: 1
+            medium:
+              type: integer
+              example: 2
+            high:
+              type: integer
+              example: 3
+            urgent:
+              type: integer
+              example: 1
+        tasks_due_within_7_days:
+          type: integer
+          example: 4
+        overdue_tasks_count:
+          type: integer
+          example: 0
+        active_projects_count:
+          type: integer
+          example: 2
+        recent_activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityLogResponse"
+
+    ProjectDashboardStatsResponse:
+      type: object
+      required:
+        - project_id
+        - total_tasks
+        - status_distribution
+        - priority_distribution
+        - overdue_tasks_count
+        - completed_ratio
+        - active_members_count
+        - member_workload
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          example: "4b5b7192-3a3a-4464-9be8-f9b6e828d844"
+        total_tasks:
+          type: integer
+          example: 18
+        status_distribution:
+          type: object
+          properties:
+            todo:
+              type: integer
+              example: 8
+            in_progress:
+              type: integer
+              example: 6
+            completed:
+              type: integer
+              example: 4
+        priority_distribution:
+          type: object
+          properties:
+            low:
+              type: integer
+              example: 2
+            medium:
+              type: integer
+              example: 8
+            high:
+              type: integer
+              example: 6
+            urgent:
+              type: integer
+              example: 2
+        overdue_tasks_count:
+          type: integer
+          example: 1
+        completed_ratio:
+          type: number
+          format: float
+          description: Percentage of tasks completed (0.0 to 1.0)
+          example: 0.222
+        active_members_count:
+          type: integer
+          example: 4
+        member_workload:
+          type: array
+          items:
+            type: object
+            required:
+              - user
+              - assigned_count
+              - in_progress_count
+              - completed_count
+            properties:
+              user:
+                $ref: "#/components/schemas/UserSummaryResponse"
+              assigned_count:
+                type: integer
+                example: 5
+              in_progress_count:
+                type: integer
+                example: 2
+              completed_count:
+                type: integer
+                example: 2
