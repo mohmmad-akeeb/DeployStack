@@ -73,4 +73,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: minioadmin
           AWS_DEFAULT_REGION: us-east-1
           S3_BUCKET_NAME: deploystack-attachments
-        run: pytest -v
+        run: |
+          alembic upgrade head
+          pytest -v
